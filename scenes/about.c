@@ -18,7 +18,7 @@ void tesla_fsd_scene_about_on_enter(void* context) {
         "Unlocks FSD on HW3/HW4\n"
         "via CAN bus injection.\n"
         "Requires CAN Add-On.\n"
-        "github.com/YOUR/flipper-tesla-fsd");
+        "github.com/hypery11/flipper-tesla-fsd");
 
     view_dispatcher_switch_to_view(app->view_dispatcher, TeslaFSDViewWidget);
 }

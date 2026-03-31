@@ -4,7 +4,7 @@
 Tesla FSD
 
 ## Repository
-https://github.com/YOUR_USERNAME/flipper-tesla-fsd
+https://github.com/hypery11/flipper-tesla-fsd
 
 ## Category
 GPIO

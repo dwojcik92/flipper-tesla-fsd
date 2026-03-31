@@ -1,7 +1,7 @@
 # New App Request: tesla_fsd
 
 **App name:** Tesla FSD
-**Repo:** https://github.com/YOUR_USERNAME/flipper-tesla-fsd
+**Repo:** https://github.com/hypery11/flipper-tesla-fsd
 **Category:** GPIO
 **License:** GPL-3.0
 **Requires:** Electronic Cats CAN Bus Add-On (MCP2515)

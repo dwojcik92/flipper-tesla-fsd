@@ -52,7 +52,7 @@ Alternative connection point: **X179 diagnostic connector** in the rear center c
 
 ### Option 1: Download Pre-built FAP
 
-1. Go to [Releases](https://github.com/YOUR/flipper-tesla-fsd/releases)
+1. Go to [Releases](https://github.com/hypery11/flipper-tesla-fsd/releases)
 2. Download `tesla_fsd.fap`
 3. Copy to your Flipper's SD card: `SD Card/apps/GPIO/tesla_fsd.fap`
 
@@ -64,7 +64,7 @@ git clone --recursive https://github.com/flipperdevices/flipperzero-firmware.git
 cd flipperzero-firmware
 
 # Clone this app into the applications_user directory
-git clone https://github.com/YOUR/flipper-tesla-fsd.git applications_user/tesla_fsd
+git clone https://github.com/hypery11/flipper-tesla-fsd.git applications_user/tesla_fsd
 
 # Build
 ./fbt fap_tesla_fsd
