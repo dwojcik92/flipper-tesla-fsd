@@ -56,7 +56,9 @@ static void spi_bus_callback(const FuriHalSpiBusHandle* handle, FuriHalSpiBusHan
 FuriHalSpiBusHandle* spi_alloc() {
     FuriHalSpiBusHandle* spi = malloc(sizeof(FuriHalSpiBusHandle));
     spi->bus = BUS;
-    spi->callback = &spi_bus_callback;
+    // Cast needed: official firmware uses const in the callback typedef,
+    // Momentum/Xtreme use non-const. The cast makes both compile cleanly.
+    spi->callback = (FuriHalSpiBusHandleEventCallback)spi_bus_callback;
     spi->cs = CS;
     spi->miso = MISO;
     spi->mosi = MOSI;
