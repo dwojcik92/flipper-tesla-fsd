@@ -25,6 +25,17 @@
   #define SD_MOSI            15
   #define SD_SCLK            14
   #define SD_CS              13
+#elif defined(BOARD_FEATHER_RP2040_CAN)
+  // Adafruit Feather RP2040 CAN — MCP25625 on SPI1
+  // SPI1 pins (SCK=14, MOSI=15, MISO=8) are configured by the board variant;
+  // SPI.begin() with no arguments uses them automatically.
+  #define PIN_MCP_CS          10    // GPIO10 — CAN_CS
+  #define PIN_CAN_INT          9    // GPIO9  — MCP25625 ~INT (active-low)
+  #define PIN_LED             16    // GPIO16 — NeoPixel data
+  #define PIN_NEOPIXEL_POWER  17    // GPIO17 — NeoPixel power (active HIGH)
+  // No dedicated user button on this board; button logic is disabled.
+  // MCP25625 ships with a 16 MHz crystal on the Feather RP2040 CAN.
+  #define MCP_CRYSTAL_MHZ   MCP_16MHZ
 #else
   #ifndef PIN_CAN_TX
   #define PIN_CAN_TX   22   // TWAI TX → ATOMIC CAN Base TX
@@ -36,19 +47,24 @@
   #define PIN_LED      27   // SK6812 NeoPixel (single LED)
   #endif
 #endif
-#ifndef PIN_BUTTON
+#if !defined(BOARD_FEATHER_RP2040_CAN) && !defined(PIN_BUTTON)
 #define PIN_BUTTON   39   // Built-in button, active-LOW (no external pull-up needed)
 #endif
 
-// MCP2515 SPI — only used in CAN_DRIVER_MCP2515 build (generic ESP32)
-// Standard VSPI pins: SCK=18, MISO=19, MOSI=23, CS=5
-#define PIN_MCP_CS   5
-#define PIN_MCP_SCK  18
-#define PIN_MCP_MISO 19
-#define PIN_MCP_MOSI 23
-
-// MCP2515 oscillator: common Chinese modules use 8 MHz
-#define MCP_CRYSTAL_MHZ  MCP_8MHZ   // from autowp-mcp2515 CAN_CLOCK enum
+// MCP2515 SPI — only used in CAN_DRIVER_MCP2515 build
+#if !defined(BOARD_FEATHER_RP2040_CAN)
+  // Generic ESP32: Standard VSPI pins: SCK=18, MISO=19, MOSI=23, CS=5
+  #ifndef PIN_MCP_CS
+  #define PIN_MCP_CS   5
+  #endif
+  #define PIN_MCP_SCK  18
+  #define PIN_MCP_MISO 19
+  #define PIN_MCP_MOSI 23
+  // MCP2515 oscillator: common Chinese modules use 8 MHz
+  #ifndef MCP_CRYSTAL_MHZ
+  #define MCP_CRYSTAL_MHZ  MCP_8MHZ   // from autowp-mcp2515 CAN_CLOCK enum
+  #endif
+#endif
 
 // ── Timing ────────────────────────────────────────────────────────────────────
 #define WIRING_WARN_MS        5000u   // Red LED / serial warning if no CAN after this

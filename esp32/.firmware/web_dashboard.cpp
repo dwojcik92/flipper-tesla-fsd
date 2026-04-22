@@ -1,3 +1,4 @@
+#ifdef ESP32
 /*
  * web_dashboard.cpp — HTTP + WebSocket dashboard for Tesla FSD ESP32
  *
@@ -568,3 +569,4 @@ void web_dashboard_update() {
         g_ws.broadcastTXT(json.c_str(), json.length());
     }
 }
+#endif // ESP32

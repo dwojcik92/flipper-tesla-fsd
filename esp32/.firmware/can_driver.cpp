@@ -101,16 +101,20 @@ CanDriver *can_driver_create() {
 #include <mcp2515.h>   // autowp/autowp-mcp2515
 
 class Mcp2515Driver : public CanDriver {
-    MCP2515  mcp_;
+    MCP2515  mcp_{PIN_MCP_CS};   // board variant routes SPI to correct bus
     bool     listen_only_  = false;
     uint32_t err_count_    = 0;
 
 public:
-    Mcp2515Driver() : mcp_(PIN_MCP_CS) {}
-
     bool begin(bool listen_only) override {
+#if defined(BOARD_FEATHER_RP2040_CAN)
+        // RP2040: SPI1 is the default SPI bus on this board variant — no pin args needed.
+        SPI.begin();
+#else
+        // ESP32: configure VSPI with explicit pin assignment.
         SPI.begin(PIN_MCP_SCK, PIN_MCP_MISO, PIN_MCP_MOSI, PIN_MCP_CS);
         SPI.setFrequency(8000000);
+#endif
 
         mcp_.reset();
         if (mcp_.setBitrate(CAN_500KBPS, MCP_CRYSTAL_MHZ) != MCP2515::ERROR_OK)

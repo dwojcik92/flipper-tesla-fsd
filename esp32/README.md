@@ -110,6 +110,7 @@ Any ESP32 board + CAN transceiver works. Pick the matching build env in `platfor
 | `esp32-mcp2515` | Generic ESP32 + MCP2515 module | MCP2515 SPI | SPI CS=5 | 8 MHz crystal |
 | `esp32-lilygo` | LilyGO T-CAN485 | TWAI | 27 / 26 | Built-in SN65HVD230 + SD slot |
 | `waveshare-s3-can` | Waveshare ESP32-S3-RS485-CAN | TWAI | 15 / 16 | ESP32-S3, 8MB flash/PSRAM, USB-CDC |
+| **`feather_rp2040_can`** | **Adafruit Feather RP2040 CAN** | **MCP25625 SPI1** | **SPI1 (GPIO10 CS)** | **RP2040, no WiFi dashboard** |
 | generic | ESP32-C3/S3 Super Mini + SN65HVD230 | TWAI | any two pins | Override `PIN_CAN_TX` / `PIN_CAN_RX` |
 
 Build + upload:
@@ -119,6 +120,148 @@ pio run -e <env-name> -t upload -t monitor
 ```
 
 On first boot every target prints its pin map as `[CFG] pins: LED=.. BUTTON=.. CAN_TX=.. CAN_RX=..` — if the numbers don't match your board, the build flags are being shadowed by an unguarded `#define` somewhere.
+
+---
+
+## Adafruit Feather RP2040 CAN — HW3 Setup & Flash Guide
+
+This section is specifically for **Adafruit Feather RP2040 CAN** running on **Tesla Model 3/Y HW3 (AMD)**.
+
+### Prerequisites
+
+- [PlatformIO CLI](https://docs.platformio.org/en/latest/core/installation/index.html) or [VSCode PlatformIO extension](https://platformio.org/install/ide?install=vscode)
+- USB cable (Feather RP2040 uses USB-C or Micro-USB depending on revision)
+- Adafruit Feather RP2040 CAN board
+
+### Step 1 — Configure features in `platformio.ini`
+
+Open `esp32/platformio.ini` and find the `[env:feather_rp2040_can]` section. Uncomment the feature flags you want baked in:
+
+```ini
+build_flags =
+    -D BOARD_FEATHER_RP2040_CAN
+    -D CAN_DRIVER_MCP2515
+    -D HW3                    ; <-- keep this for Model 3/Y HW3
+
+    ; Uncomment any features you want ON at boot:
+    ;-D FORCE_FSD             ; skip the car's UI toggle — FSD always active
+    ;-D NAG_KILLER_OFF        ; start with NAG Killer disabled
+    ;-D PRECONDITION          ; inject battery precondition frame every 500 ms
+    ;-D TLSSC_RESTORE         ; restore TLSSC tier via 0x331 spoof
+```
+
+#### Feature reference (HW3)
+
+| Build flag | Default | What it does | HW3 supported |
+|---|---|---|---|
+| `HW3` | **required** | Targets HW3 CAN protocol (`0x3FD`, `0x3F8`) | ✅ |
+| `FORCE_FSD` | off | FSD activates without needing "Traffic Light & Stop Sign" enabled in car UI | ✅ |
+| `NAG_KILLER` | off | Suppresses hands-on-wheel reminder via `0x370` counter+1 echo | ✅ |
+| `PRECONDITION` | off | Periodically injects `0x082` (UI_tripPlanning) to trigger battery preconditioning | ✅ |
+| `TLSSC_RESTORE` | off | Spoofs `0x331` DAS config frame to restore Traffic-Light-Stop-Sign-Control tier if it was downgraded | ✅ |
+| `FORCE_FSD` + `TLSSC_RESTORE` | — | Recommended combo: always enables FSD and restores the tier | ✅ |
+
+> **Features that do NOT apply to HW3** (defined in code but silently ignored on this hardware):
+> - ISA speed chime suppress — only works on HW4 (`0x399` is absent on HW3)
+> - Emergency vehicle detection — HW4 `0x3FD` mux0 bit59 only
+
+#### Examples
+
+Minimal — just FSD unlock with NAG Killer:
+```ini
+build_flags =
+    -D BOARD_FEATHER_RP2040_CAN
+    -D CAN_DRIVER_MCP2515
+    -D HW3
+```
+
+Full — FSD always on, NAG Killer, TLSSC restore, battery precondition:
+```ini
+build_flags =
+    -D BOARD_FEATHER_RP2040_CAN
+    -D CAN_DRIVER_MCP2515
+    -D HW3
+    -D FORCE_FSD
+    -D NAG_KILLER
+    -D PRECONDITION
+    -D TLSSC_RESTORE
+```
+
+### Step 2 — Put the board in bootloader mode
+
+Hold the **BOOT** button on the Feather RP2040, then plug in USB (or press RESET while holding BOOT). The board will appear as a USB drive called `RPI-RP2`.
+
+> With PlatformIO this is handled automatically — the tool resets the board into bootloader mode before uploading.
+
+### Step 3 — Flash
+
+From the `esp32/` directory:
+
+```bash
+cd esp32
+pio run -e feather_rp2040_can -t upload
+```
+
+Or build only (no upload):
+
+```bash
+pio run -e feather_rp2040_can
+```
+
+Expected output when flashing succeeds:
+
+```
+Linking .pio/build/feather_rp2040_can/firmware.elf
+Building .pio/build/feather_rp2040_can/firmware.uf2
+Uploading .pio/build/feather_rp2040_can/firmware.uf2
+```
+
+### Step 4 — Monitor serial output
+
+```bash
+pio device monitor -e feather_rp2040_can
+```
+
+Expected boot output:
+
+```
+============================
+ Tesla FSD Unlock — RP2040
+============================
+[FSD] Build: Apr 22 2026 ...
+[CAN] Driver: MCP25625 via SPI1 (Feather RP2040 CAN)
+[HW]  Pre-configured: HW3 (Model 3/Y)
+[CFG] pins: LED=16 MCP_CS=10 CAN_INT=9
+[CAN] 500 kbps — Listen-Only
+[INFO] No button — starts in Listen-Only; NAG Killer ON
+[LED] Blue=Listen  Green=Active  Yellow=OTA  Red=Error
+```
+
+> The Feather RP2040 CAN has **no user button**, so the device automatically starts in **Active mode** (TX enabled) after boot — there is no need to click anything. It will begin modifying CAN frames as soon as the car is detected.
+
+### Step 5 — LED status
+
+| LED color | Meaning |
+|-----------|---------|
+| Blue | Starting up / waiting for CAN traffic |
+| Green | Active — FSD frames being sent |
+| Yellow | OTA update detected — TX paused |
+| Red | No CAN traffic after 5 s — check wiring |
+
+### Wiring (Feather RP2040 CAN)
+
+The Feather RP2040 CAN board has a built-in MCP25625 CAN transceiver with a screw-terminal connector. Connect it to the Tesla OBD-II port:
+
+| OBD-II Pin | Signal | Feather RP2040 CAN terminal |
+|---|---|---|
+| Pin 6 | CAN High | `CAN H` screw terminal |
+| Pin 14 | CAN Low | `CAN L` screw terminal |
+| Pin 16 | +12V | `VIN` (via diode/regulator — see note below) |
+| Pin 4 or 5 | GND | `GND` |
+
+> **Power note:** OBD-II pin 16 is unswitched 12V battery. Use a small **12V → 5V USB regulator** (e.g. a cheap OBD-to-USB dongle) to feed the Feather's `USB` pin, or a dedicated 12V → 3.3V LDO into the `3V3` pin. Do **not** connect 12V directly to any GPIO or the 5V pin.
+
+---
 
 ---
 
@@ -176,18 +319,27 @@ Bus speed: **500 kbps**
 
 ### Prerequisites
 - [PlatformIO](https://platformio.org/) (CLI or VSCode extension)
-- USB-C cable connected to M5Stack ATOM Lite
+- USB-C cable
 
 ### Build
 ```bash
 git clone https://github.com/hypery11/flipper-tesla-fsd.git
 cd flipper-tesla-fsd/esp32
+
+# ESP32 (M5Stack ATOM Lite)
 pio run -e m5stack-atom
+
+# Feather RP2040 CAN
+pio run -e feather_rp2040_can
 ```
 
 ### Flash
 ```bash
+# ESP32
 pio run -e m5stack-atom -t upload
+
+# Feather RP2040 CAN (see full guide above for bootloader entry)
+pio run -e feather_rp2040_can -t upload
 ```
 
 ### Monitor Serial Output

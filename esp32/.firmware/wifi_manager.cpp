@@ -1,3 +1,4 @@
+#ifdef ESP32
 #include "wifi_manager.h"
 #include <WiFi.h>
 #include <Arduino.h>
@@ -17,3 +18,4 @@ bool wifi_ap_init() {
     }
     return ok;
 }
+#endif // ESP32

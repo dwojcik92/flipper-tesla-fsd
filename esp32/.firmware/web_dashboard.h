@@ -13,15 +13,13 @@
  * Call web_dashboard_init() once after wifi_ap_init() succeeds.
  * Call web_dashboard_update() every loop iteration (after CAN processing).
  * If init was never called, update() is a safe no-op.
+ * Non-ESP32 targets (e.g. RP2040) get inline no-op stubs.
  */
 
-/**
- * Initialise HTTP and WebSocket servers.
- *
- * @param state  Pointer to the shared FSDState (read + written by command handler)
- * @param can    Pointer to the active CanDriver (used by mode-toggle command)
- */
+#ifdef ESP32
 void web_dashboard_init(FSDState *state, CanDriver *can);
-
-/** Service HTTP requests and WebSocket messages; broadcast state at 1 Hz. */
 void web_dashboard_update();
+#else
+inline void web_dashboard_init(FSDState *, CanDriver *) {}
+inline void web_dashboard_update() {}
+#endif

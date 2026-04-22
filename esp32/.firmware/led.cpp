@@ -3,9 +3,16 @@
 #include <Adafruit_NeoPixel.h>
 
 // M5Stack ATOM Lite: single SK6812 (GRB order) on PIN_LED (GPIO27)
+// Adafruit Feather RP2040 CAN: WS2812B NeoPixel on GPIO16 (power via GPIO17)
 static Adafruit_NeoPixel g_strip(1, PIN_LED, NEO_GRB + NEO_KHZ800);
 
 void led_init() {
+#if defined(PIN_NEOPIXEL_POWER)
+    // Enable NeoPixel power supply before initialising the strip.
+    pinMode(PIN_NEOPIXEL_POWER, OUTPUT);
+    digitalWrite(PIN_NEOPIXEL_POWER, HIGH);
+    delay(1);  // let the rail settle
+#endif
     g_strip.begin();
     g_strip.setBrightness(25);  // keep dim — the ATOM LED is very bright
     g_strip.clear();

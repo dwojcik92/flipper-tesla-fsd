@@ -50,7 +50,8 @@ static void apply_detected_hw(TeslaHWVersion hw, const char *reason) {
     can_dump_log("HW  auto-detected: %s (%s)", hw_str, reason);
 }
 
-// ── Button state machine ──────────────────────────────────────────────────────
+// ── Button state machine (disabled when no PIN_BUTTON, e.g. Feather RP2040 CAN) ──
+#ifdef PIN_BUTTON
 static uint32_t g_btn_down_ms     = 0;
 static uint32_t g_last_release_ms = 0;
 static bool     g_btn_down        = false;
@@ -116,6 +117,7 @@ static void button_tick() {
         g_pending_clicks = 0;
     }
 }
+#endif // PIN_BUTTON
 
 // ── LED refresh ───────────────────────────────────────────────────────────────
 static void update_led() {
@@ -255,7 +257,11 @@ void setup() {
     delay(300);
 
     Serial.println("\n============================");
+#if defined(BOARD_FEATHER_RP2040_CAN)
+    Serial.println(" Tesla FSD Unlock — RP2040  ");
+#else
     Serial.println(" Tesla FSD Unlock — ESP32   ");
+#endif
     Serial.println("============================");
     Serial.printf("[FSD] Build: %s %s\n", __DATE__, __TIME__);
 #if defined(CAN_DRIVER_TWAI)
@@ -267,7 +273,11 @@ void setup() {
     Serial.println("[CAN] Driver: ESP32 TWAI (M5Stack ATOM Lite + ATOMIC CAN Base)");
   #endif
 #elif defined(CAN_DRIVER_MCP2515)
+  #if defined(BOARD_FEATHER_RP2040_CAN)
+    Serial.println("[CAN] Driver: MCP25625 via SPI1 (Feather RP2040 CAN)");
+  #else
     Serial.println("[CAN] Driver: MCP2515 via SPI");
+  #endif
 #endif
 
 #if defined(BOARD_LILYGO)
@@ -280,19 +290,72 @@ void setup() {
     digitalWrite(PIN_CAN_SPEED_MODE, LOW);
 #endif
 
+#if defined(BOARD_FEATHER_RP2040_CAN)
+    Serial.printf("[CFG] pins: LED=%d MCP_CS=%d CAN_INT=%d\n",
+                  PIN_LED, PIN_MCP_CS, PIN_CAN_INT);
+#else
     Serial.printf("[CFG] pins: LED=%d BUTTON=%d CAN_TX=%d CAN_RX=%d\n",
                   PIN_LED, PIN_BUTTON, PIN_CAN_TX, PIN_CAN_RX);
+#endif
 
+#ifdef PIN_BUTTON
     pinMode(PIN_BUTTON, INPUT_PULLUP);
+#endif
     led_init();
 
+    // ── Hardware pre-configuration from build flags ───────────────────────────
+#if defined(HW3)
+    fsd_state_init(&g_state, TeslaHW_HW3);
+    Serial.println("[HW]  Pre-configured: HW3 (Model 3/Y)");
+#elif defined(HW4)
+    fsd_state_init(&g_state, TeslaHW_HW4);
+    Serial.println("[HW]  Pre-configured: HW4");
+#elif defined(LEGACY)
+    fsd_state_init(&g_state, TeslaHW_Legacy);
+    Serial.println("[HW]  Pre-configured: Legacy");
+#else
     fsd_state_init(&g_state, TeslaHW_Unknown);
+    Serial.println("[HW]  Auto-detect enabled — waiting for 0x398");
+#endif
     // Explicit safe defaults — will be overridden after HW auto-detect
+#ifdef PIN_BUTTON
+    // ESP32: start listen-only; single button click enables TX.
     g_state.op_mode               = OpMode_ListenOnly;
-    g_state.nag_killer            = true;
-    g_state.suppress_speed_chime  = true;
-    g_state.emergency_vehicle_detect = false;
+#else
+    // RP2040 (no button): start in Active mode immediately so FSD can be enabled.
+    g_state.op_mode               = OpMode_Active;
+#endif
+    // Feature defaults — each can be overridden by a build flag in platformio.ini.
+    // e.g. add  -D FORCE_FSD  to build_flags to bake that feature on at boot.
+#if defined(FORCE_FSD)
+    g_state.force_fsd             = true;
+#else
     g_state.force_fsd             = false;
+#endif
+
+#if defined(NAG_KILLER)
+    g_state.nag_killer            = true;
+#else
+    g_state.nag_killer            = false;
+#endif
+
+    // ISA chime suppress: only meaningful on HW4; harmless but unused on HW3.
+    g_state.suppress_speed_chime  = true;   // on by default (no-op on HW3)
+
+    g_state.emergency_vehicle_detect = false;  // HW4 only
+
+#if defined(PRECONDITION)
+    g_state.precondition          = true;
+#else
+    g_state.precondition          = false;
+#endif
+
+#if defined(TLSSC_RESTORE)
+    g_state.tlssc_restore         = true;
+#else
+    g_state.tlssc_restore         = false;
+#endif
+
     g_state.bms_output            = false;
 
     led_set(LED_BLUE);
@@ -311,9 +374,14 @@ void setup() {
     }
 
     Serial.println("[CAN] 500 kbps — Listen-Only");
+#ifdef PIN_BUTTON
     Serial.println("[BTN] Single click : toggle Listen-Only / Active");
     Serial.println("[BTN] Long press 3s: toggle NAG Killer");
     Serial.println("[BTN] Double click : toggle BMS serial output");
+#else
+    Serial.println("[INFO] No button — starts in Listen-Only; NAG Killer ON");
+    Serial.println("[INFO] Toggle Active mode: connect D4 to GND momentarily");
+#endif
     Serial.println("[LED] Blue=Listen  Green=Active  Yellow=OTA  Red=Error");
 
     // ── WiFi AP + Web dashboard (non-fatal if WiFi fails) ─────────────────────
@@ -326,7 +394,9 @@ void setup() {
 void loop() {
     uint32_t now = millis();
 
+#ifdef PIN_BUTTON
     button_tick();
+#endif
 
     // Drain all available CAN frames in one shot
     CanFrame frame;
