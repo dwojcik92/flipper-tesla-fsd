@@ -108,6 +108,14 @@ class Mcp2515Driver : public CanDriver {
 public:
     bool begin(bool listen_only) override {
 #if defined(BOARD_FEATHER_RP2040_CAN)
+        pinMode(PIN_MCP_RESET, OUTPUT);
+        digitalWrite(PIN_MCP_RESET, HIGH);
+        pinMode(PIN_CAN_STBY, OUTPUT);
+        digitalWrite(PIN_CAN_STBY, LOW);
+        pinMode(PIN_CAN_INT, INPUT_PULLUP);
+        pinMode(PIN_MCP_CS, OUTPUT);
+        digitalWrite(PIN_MCP_CS, HIGH);
+
         // RP2040: SPI1 is the default SPI bus on this board variant — no pin args needed.
         SPI.begin();
 #else

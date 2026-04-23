@@ -1,5 +1,9 @@
 #pragma once
 
+#if defined(ARDUINO_ARCH_RP2040)
+#include <Arduino.h>
+#endif
+
 // ── CAN IDs ───────────────────────────────────────────────────────────────────
 #define CAN_ID_STW_ACTN_RQ    0x045u  // 69   - STW_ACTN_RQ:  steering stalk (Legacy follow distance)
 #define CAN_ID_TRIP_PLANNING  0x082u  // 130  - UI_tripPlanning: precondition trigger
@@ -30,11 +34,14 @@
   // Adafruit Feather RP2040 CAN — MCP25625 on SPI1
   // SPI1 pins (SCK=14, MOSI=15, MISO=8) are configured by the board variant;
   // SPI.begin() with no arguments uses them automatically.
-  #define PIN_MCP_CS          10    // GPIO10 — CAN_CS
-  #define PIN_CAN_INT          9    // GPIO9  — MCP25625 ~INT (active-low)
-  #undef  PIN_LED                   // board variant defines PIN_LED=13; override for NeoPixel
-  #define PIN_LED             16    // GPIO16 — NeoPixel data
-  #define PIN_NEOPIXEL_POWER  17    // GPIO17 — NeoPixel power (active HIGH)
+  #define PIN_MCP_CS          PIN_CAN_CS         // GPIO19 — MCP25625 CS
+  #define PIN_CAN_INT         PIN_CAN_INTERRUPT  // GPIO22 — MCP25625 ~INT (active-low)
+  #define PIN_CAN_STBY        PIN_CAN_STANDBY    // GPIO16 — transceiver standby, active-high
+  #define PIN_MCP_RESET       PIN_CAN_RESET      // GPIO18 — MCP25625 reset, active-low
+  #undef  PIN_LED                               // board variant defines PIN_LED=13
+  #define PIN_LED             PIN_NEOPIXEL       // GPIO21 — NeoPixel data
+  #define PIN_NEOPIXEL_POWER  NEOPIXEL_POWER     // GPIO20 — NeoPixel power (active HIGH)
+  #undef  PIN_BUTTON
   // No dedicated user button on this board; button logic is disabled.
   // MCP25625 ships with a 16 MHz crystal on the Feather RP2040 CAN.
   #define MCP_CRYSTAL_MHZ   MCP_16MHZ

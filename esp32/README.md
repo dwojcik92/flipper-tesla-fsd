@@ -17,7 +17,9 @@ Unlock Tesla FSD with an ESP32 + CAN transceiver via OBD-II. No Flipper Zero nee
 > The BMS parser and dashboard fields are implemented in code, but on current tested setup they do not provide reliable/usable live data yet.
 
 > [!IMPORTANT]
-> The device boots in **Listen-Only mode** by default and will **not transmit any CAN frames** until the user explicitly switches to Active mode via the physical button or Web Dashboard UI. This ensures safe first-boot behavior.
+> ESP32 targets boot in **Listen-Only mode** by default and will **not transmit any CAN frames** until the user explicitly switches to Active mode via the physical button or Web Dashboard UI. This ensures safe first-boot behavior.
+>
+> The **Adafruit Feather RP2040 CAN** target is a compact no-dashboard/no-button mod. It boots directly into **Active mode** unless `PASSIVE_MODE` is compiled in.
 
 ---
 
@@ -63,11 +65,21 @@ All CAN protocol handling from hypery11's Flipper Zero implementation (`fsd_hand
 - **Device Info** — firmware build date, uptime counter, WiFi client count
 - **REST API** — `GET /api/status` returns full JSON state
 
+**Adafruit Feather RP2040 CAN mod** — compact RP2040 build for the onboard MCP25625 CAN controller:
+
+- **Native Feather RP2040 CAN support** via PlatformIO env `feather_rp2040_can`
+- **Correct onboard MCP25625 pin map**: SPI1 `SCK=14`, `MOSI=15`, `MISO=8`, `CS=19`, `INT=22`
+- **CAN transceiver setup**: MCP reset held high and standby driven low before CAN init
+- **No WiFi dashboard** on RP2040; serial monitor + NeoPixel status only
+- **No runtime button controls**; boots Active by default so baked-in feature flags work immediately
+- **`PASSIVE_MODE` wiring test** still available; when enabled it forces Listen-Only and disables all TX
+
 ### CAN Driver Abstraction
 
 Dual CAN driver support (compile-time switch):
 - **ESP32 TWAI** — for M5Stack ATOM Lite + ATOMIC CAN Base (CA-IS3050G transceiver)
 - **MCP2515 SPI** — for generic ESP32 + MCP2515 CAN module setups
+- **MCP25625 SPI1** — for Adafruit Feather RP2040 CAN; MCP25625 is MCP2515-compatible at the driver level
 
 ---
 
@@ -83,7 +95,7 @@ Dual CAN driver support (compile-time switch):
 | **BMS Dashboard** | `0x132`/`0x292`/`0x312` | Parsing/UI path implemented, but currently not working reliably |
 | **OTA Protection** | `0x318` | Auto-stops TX when OTA update detected |
 | **HW Auto-Detect** | `0x398` | Reads GTW_carConfig for HW version |
-| **Listen-Only Mode** | — | Default on boot, passive monitoring only |
+| **Listen-Only Mode** | — | Default on ESP32 boot; Feather uses `PASSIVE_MODE` for passive-only wiring tests |
 | **Wiring Check** | — | rx_count + CRC error monitoring |
 | **WiFi Dashboard** | — | Real-time web UI at 192.168.4.1 |
 
@@ -110,7 +122,7 @@ Any ESP32 board + CAN transceiver works. Pick the matching build env in `platfor
 | `esp32-mcp2515` | Generic ESP32 + MCP2515 module | MCP2515 SPI | SPI CS=5 | 8 MHz crystal |
 | `esp32-lilygo` | LilyGO T-CAN485 | TWAI | 27 / 26 | Built-in SN65HVD230 + SD slot |
 | `waveshare-s3-can` | Waveshare ESP32-S3-RS485-CAN | TWAI | 15 / 16 | ESP32-S3, 8MB flash/PSRAM, USB-CDC |
-| **`feather_rp2040_can`** | **Adafruit Feather RP2040 CAN** | **MCP25625 SPI1** | **SPI1 (GPIO10 CS)** | **RP2040, no WiFi dashboard** |
+| **`feather_rp2040_can`** | **Adafruit Feather RP2040 CAN** | **MCP25625 SPI1** | **SPI1 CS=19, INT=22** | **RP2040, no WiFi dashboard; auto-active unless `PASSIVE_MODE`** |
 | generic | ESP32-C3/S3 Super Mini + SN65HVD230 | TWAI | any two pins | Override `PIN_CAN_TX` / `PIN_CAN_RX` |
 
 Build + upload:
@@ -119,13 +131,21 @@ Build + upload:
 pio run -e <env-name> -t upload -t monitor
 ```
 
-On first boot every target prints its pin map as `[CFG] pins: LED=.. BUTTON=.. CAN_TX=.. CAN_RX=..` — if the numbers don't match your board, the build flags are being shadowed by an unguarded `#define` somewhere.
+On first boot ESP32 targets print `[CFG] pins: LED=.. BUTTON=.. CAN_TX=.. CAN_RX=..`. The Feather RP2040 CAN target prints `[CFG] pins: LED=21 MCP_CS=19 CAN_INT=22`. If the numbers don't match your board, the build flags or board variant are being shadowed by an unguarded `#define` somewhere.
 
 ---
 
 ## Adafruit Feather RP2040 CAN — HW3 Setup & Flash Guide
 
 This section is specifically for **Adafruit Feather RP2040 CAN** running on **Tesla Model 3/Y HW3 (AMD)**.
+
+This RP2040 build is intended as a small always-on CAN mod:
+
+- MCP25625 onboard CAN controller over SPI1
+- corrected Feather CAN pins: `LED=21`, `MCP_CS=19`, `CAN_INT=22`
+- no WiFi dashboard
+- no runtime button controls
+- starts **Active** by default unless `PASSIVE_MODE` is enabled
 
 ### Prerequisites
 
@@ -192,6 +212,16 @@ build_flags =
     -D SUMMON_EU_UNLOCK
 ```
 
+Wiring test only — receive CAN traffic without transmitting anything:
+
+```ini
+build_flags =
+    -D BOARD_FEATHER_RP2040_CAN
+    -D CAN_DRIVER_MCP2515
+    -D HW3
+    -D PASSIVE_MODE
+```
+
 ### Step 2 — Put the board in bootloader mode
 
 Hold the **BOOT** button on the Feather RP2040, then plug in USB (or press RESET while holding BOOT). The board will appear as a USB drive called `RPI-RP2`.
@@ -236,20 +266,21 @@ Expected boot output:
 [FSD] Build: Apr 22 2026 ...
 [CAN] Driver: MCP25625 via SPI1 (Feather RP2040 CAN)
 [HW]  Pre-configured: HW3 (Model 3/Y)
-[CFG] pins: LED=16 MCP_CS=10 CAN_INT=9
-[CAN] 500 kbps — Listen-Only
-[INFO] No button — starts in Listen-Only; NAG Killer ON
+[CFG] pins: LED=21 MCP_CS=19 CAN_INT=22
+[CAN] 500 kbps — Active (no button, auto-enabled)
 [LED] Blue=Listen  Green=Active  Yellow=OTA  Red=Error
 ```
 
 > The Feather RP2040 CAN has **no user button**, so the device automatically starts in **Active mode** (TX enabled) after boot — there is no need to click anything. It will begin modifying CAN frames as soon as the car is detected.
+>
+> If the log says `Listen-Only` and the LED is blue, TX is disabled. That is expected only for `PASSIVE_MODE` builds or if a board-variant button define leaked into the Feather config.
 
 ### Step 5 — LED status
 
 | LED color | Meaning |
 |-----------|---------|
-| Blue | Starting up / waiting for CAN traffic |
-| Green | Active — FSD frames being sent |
+| Blue | Listen-Only — passive monitoring, no TX |
+| Green | Active — CAN TX enabled; compiled feature flags can modify frames |
 | Yellow | OTA update detected — TX paused |
 | Red | No CAN traffic after 5 s — check wiring |
 
@@ -373,6 +404,14 @@ pio device monitor -b 115200
 
 ## Usage
 
+### Feather RP2040 CAN
+
+1. Flash firmware with the `feather_rp2040_can` env.
+2. Connect OBD-II Pin 6 to `CAN H`, Pin 14 to `CAN L`, and ground/power as described above.
+3. Open serial monitor and verify the boot log shows `LED=21 MCP_CS=19 CAN_INT=22`.
+4. For normal use, verify `[CAN] 500 kbps — Active (no button, auto-enabled)` and a green LED.
+5. For wiring tests, compile with `-D PASSIVE_MODE`; the device will stay blue/Listen-Only and will not transmit.
+
 ### Physical Controls
 
 1. Flash firmware to M5Stack ATOM Lite
@@ -410,7 +449,8 @@ pio device monitor -b 115200
 ## Safety
 
 - **OTA Protection** — automatically stops all CAN TX when a software update is detected on `0x318`
-- **Listen-Only default** — device will not modify any CAN frames until explicitly switched to Active mode
+- **Listen-Only default on ESP32** — ESP32 targets do not modify CAN frames until explicitly switched to Active mode
+- **Feather wiring test mode** — compile with `PASSIVE_MODE` when you want receive-only validation before enabling TX
 - **Wiring diagnostics** — monitors rx_count and CRC error counter; red LED if no CAN traffic
 - **DLC validation** — checks frame data length before parsing to prevent buffer overflows
 - **Unplug = reset** — remove the device and restart the car to clear any modified state
@@ -445,7 +485,7 @@ esp32/
 │   ├── web_dashboard.cpp/h — HTTP server + WebSocket + embedded UI
 │   ├── led.cpp/h           — NeoPixel LED status control
 │   └── config.h            — CAN IDs and pin definitions
-├── platformio.ini          — Build configs (m5stack-atom / esp32-mcp2515)
+├── platformio.ini          — Build configs (ESP32 TWAI/MCP2515 + Feather RP2040 CAN)
 └── README.md
 ```
 
