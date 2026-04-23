@@ -315,8 +315,9 @@ Only 2 wires needed. Power via USB-C (car USB port or power bank).
 ### X179 Diagnostic Connector (Alternative)
 
 Located in the rear center console area:
-- 20-pin connector: Pin 13 (CAN-H), Pin 14 (CAN-L)
-- 26-pin connector: Pin 18 (CAN-H), Pin 19 (CAN-L)
+- **20-pin connector:** Pin 13 (CAN-H), Pin 14 (CAN-L). 
+  - *Note:* If the **Nag Killer** does not work on Pin 13/14 (common on EAP / Legacy vehicles), use **Pin 2 (CAN-H)** and **Pin 3 (CAN-L)** instead.
+- **26-pin connector:** Pin 18 (CAN-H), Pin 19 (CAN-L).
 
 ---
 

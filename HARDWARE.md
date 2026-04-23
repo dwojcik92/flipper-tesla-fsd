@@ -83,20 +83,21 @@ panel behind the rear armrest. Two versions exist:
 
 | Pin | Signal | CAN bus |
 |-----|--------|---------|
-| **1** | **+12V** | Power |
-| 2 | CAN-H | Bus 4 (diagnostic/forwarded) |
-| 3 | CAN-L | Bus 4 |
+| 1 | +12V | Power |
+| **2** | **CAN-H** | **Bus 4 (Diagnostic — Recommended for EAP Nag Killer)** |
+| **3** | **CAN-L** | **Bus 4** |
 | 9 | CAN-H | Bus 2 (Vehicle CAN) |
 | 10 | CAN-L | Bus 2 |
 | **13** | **CAN-H** | **Bus 6 (Body/Left — Gateway mixed forwarding)** |
 | **14** | **CAN-L** | **Bus 6** |
-| **15** | **+12V** | Power (2mm² wire, alternate to pin 1) |
+| 15 | +12V | Power (2mm² wire, alternate to pin 1) |
 | 18 | CAN-H | Bus 3 (Chassis CAN — EPAS/brake) |
 | 19 | CAN-L | Bus 3 |
-| **20** | **GND** | Ground |
+| 20 | GND | Ground |
 
-**4 separate CAN bus pairs** on one connector. Pin 13/14 (bus 6) is
-what aftermarket products (Feifan Commander, enhauto, etc.) connect to.
+**4 separate CAN bus pairs** on one connector.
+- **Pin 13/14 (Bus 6)** is the "standard" connection used by most aftermarket products. It is a "mixed" bus that carries almost everything needed for FSD UI unlock.
+- **Pin 2/3 (Bus 4)** is the Diagnostic bus. Use this if the **Nag Killer** does not work on Pin 13/14 (common on EAP / Legacy 20-pin vehicles where the Gateway filters injection on Bus 6).
 
 #### X179 26-pin (2024+ Highland Model 3 / Juniper Model Y)
 

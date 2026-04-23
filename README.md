@@ -97,7 +97,7 @@
 
 > **Termination resistor:** Electronic Cats ships two revisions of this Add-On. v0.1 has the 120 Ω terminator enabled by default and you need to open the `J1 / TERM` solder jumper on the bottom of the board. v0.2+ ships with it already open. To check without opening anything, measure the resistance between the CAN-H and CAN-L screw terminals **before** plugging into the car: ~120 Ω = good (terminator off), ~60 Ω = open the jumper, open circuit = also fine. Full breakdown in [`HARDWARE.md`](HARDWARE.md#termination-resistor--important-detail).
 
-Alternative connection point: **X179 diagnostic connector** in the rear center console (Pin 13 CAN-H, Pin 14 CAN-L on 20-pin; Pin 18/19 on 26-pin).
+Alternative connection point: **X179 diagnostic connector** in the rear center console (Pin 13 CAN-H, Pin 14 CAN-L on 20-pin; Pin 18/19 on 26-pin). *Note: On 20-pin vehicles, use Pin 2/3 if Pin 13/14 fails for the Nag Killer.*
 
 ### Other supported hardware
 
