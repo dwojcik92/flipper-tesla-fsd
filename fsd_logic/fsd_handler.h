@@ -124,7 +124,7 @@ typedef struct {
     uint32_t gtw_shield_blocks;  // counter: how many frames we've blocked
 
     // --- upstream feature flags ---
-    bool enhanced_autopilot;     // when true, mux=1 also sets bit46 (EAP/summon)
+    bool summon_eu_unlock;     // when true, mux=1 also sets bit46 (EAP/summon)
     bool speed_profile_locked;   // when true, follow distance won't override profile
     uint8_t hw4_offset;          // HW4 mux=2 speed offset override (0 = no override)
 

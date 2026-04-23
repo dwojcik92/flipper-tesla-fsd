@@ -52,6 +52,7 @@ void fsd_state_init(FSDState *state, TeslaHWVersion hw) {
     state->emergency_vehicle_detect = false;
     state->force_fsd            = false;
     state->bms_output           = false;
+    state->prng_state           = 0xABCDABCDu; // xorshift32 seed (must be non-zero)
 
     // Default speed profile per HW version
     if (hw == TeslaHW_HW4)
@@ -172,6 +173,10 @@ bool fsd_handle_autopilot_frame(FSDState *state, CanFrame *frame) {
         if (mux == 1) {
             // Nag suppression via bit 19 (clear = no hands-on-wheel request)
             set_bit(frame, 19, false);
+            // Enhanced Autopilot / summon unlock: set bit 46 on mux=1
+            // Source: ev-open-can-tools HW3Handler enhancedAutopilotRuntime
+            if (state->summon_eu_unlock)
+                set_bit(frame, 46, true);
             state->nag_suppressed = true;
             modified = true;
         }
@@ -267,46 +272,109 @@ bool fsd_handle_isa_speed_chime(CanFrame *frame) {
     return true;
 }
 
-// ── NAG killer: counter+1 echo of EPAS3P_sysStatus (0x370) ──────────────────
+// ── NAG killer: PRNG organic-torque echo of EPAS3P_sysStatus (0x370) ────────
 //
-// When handsOnLevel == 0 (car about to nag), we build a spoofed EPAS frame
-// with handsOnLevel = 1 and counter = original_counter + 1, then send it
-// BEFORE the real frame hits the DAS.  The DAS sees "hands on" and suppresses
-// the nag.  The real EPAS frame arrives later with the old counter value and
-// is rejected as a duplicate.
+// Builds a spoofed EPAS frame with handsOnLevel=1 (hands confirmed) and
+// a randomised torsion-bar torque so the DAS can't fingerprint a fixed value.
 //
-// Checksum formula (same as the Chinese TSL6P module):
-//   byte7 = (sum(byte0..6) + 0x73) & 0xFF
-//   where 0x73 = (0x370 & 0xFF) + (0x370 >> 8) = 0x70 + 0x03
+// Torque encoding in 0x370:
+//   torsionBarTorque: 12-bit Motorola (bit19|12@0+), factor=0.01, offset=-20.5
+//   raw_12bit = (Nm + 20.5) * 100
+//   byte2[3:0] = high 4 bits of raw_12bit, byte3 = low 8 bits
+//
+// Ranges (verified against anchor: 0xB6 byte3 + nibble 8 = 1.80 Nm):
+//   Normal walk  1.00–2.40 Nm: raw 2150–2290 → nibble=0x8, byte3=0x66–0xF2
+//   Grip pulse   3.10–3.30 Nm: raw 2360–2380 → nibble=0x9, byte3=0x38–0x4C
+//
+// DAS-aware: when das_hands_on_state >= 3 (escalated nag), bias upper half.
+// Grip pulse: every 5–9 s, 2 frames of 3.10–3.30 Nm simulating grip adjustment.
+//
+// Checksum formula (same as TSL6P module):
+//   byte7 = (sum(byte0..6) + 0x73) & 0xFF  (0x73 = 0x70 + 0x03)
 
-bool fsd_handle_nag_killer(FSDState *state, const CanFrame *frame, CanFrame *out) {
+#define NAG_TORQUE_NORM_MIN_B3   0x66u   // 1.00 Nm
+#define NAG_TORQUE_NORM_MAX_B3   0xF2u   // 2.40 Nm
+#define NAG_TORQUE_GRIP_MIN_B3   0x38u   // 3.10 Nm
+#define NAG_TORQUE_GRIP_MAX_B3   0x4Cu   // 3.30 Nm
+#define NAG_TORQUE_GRIP_NIBBLE   0x09u   // byte2 high nibble for grip range
+#define NAG_GRIP_INTERVAL_MIN    5000u   // ms between grip pulses (min)
+#define NAG_GRIP_INTERVAL_RANGE  4000u   // + 0..4000 ms random
+#define NAG_GRIP_PULSE_FRAMES    2u      // frames per grip excursion
+
+static uint32_t xorshift32(uint32_t *s) {
+    uint32_t x = *s;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    return (*s = x);
+}
+
+bool fsd_handle_nag_killer(FSDState *state, const CanFrame *frame, CanFrame *out, uint32_t now_ms) {
     if (frame->dlc < 8)    return false;
     if (!state->nag_killer) return false;
 
-    // Act when handsOnLevel == 0 (nag imminent) or == 3 (escalated alarm).
+    // Act when handsOnLevel == 0 (nag imminent) or >= 2 (escalated).
     // Level 1 = hands confirmed OK — no action needed.
-    uint8_t hands_on = (frame->data[4] >> 6) & 0x03;
-    if (hands_on == 1) return false;
+    uint8_t hands_on_epas = (frame->data[4] >> 6) & 0x03;
+    if (hands_on_epas == 1) return false;
+
+    // Initialise grip-pulse timer on first call
+    if (state->nag_grip_due_ms == 0) {
+        uint32_t r = xorshift32(&state->prng_state);
+        state->nag_grip_due_ms = now_ms + NAG_GRIP_INTERVAL_MIN + (r % NAG_GRIP_INTERVAL_RANGE);
+    }
 
     out->id  = CAN_ID_EPAS_STATUS;
     out->dlc = 8;
-
     out->data[0] = frame->data[0];
     out->data[1] = frame->data[1];
-    out->data[2] = (frame->data[2] & 0xF0u) | 0x08u; // lower nibble = torque quality
-    out->data[3] = 0xB6u;                              // torsionBarTorque = 1.80 Nm (fixed)
-    out->data[4] = (frame->data[4] & ~0xC0u) | 0x40u;  // handsOnLevel = 1 (clear bits 7:6 first)
     out->data[5] = frame->data[5];
 
     // counter+1: lower nibble of byte 6
-    uint8_t cnt  = (frame->data[6] & 0x0Fu);
-    cnt = (cnt + 1u) & 0x0Fu;
+    uint8_t cnt = ((frame->data[6] & 0x0Fu) + 1u) & 0x0Fu;
     out->data[6] = (frame->data[6] & 0xF0u) | cnt;
+
+    // Grip pulse state machine
+    bool grip = false;
+    if (state->nag_grip_frames > 0) {
+        grip = true;
+        state->nag_grip_frames--;
+        if (state->nag_grip_frames == 0) {
+            uint32_t r = xorshift32(&state->prng_state);
+            state->nag_grip_due_ms = now_ms + NAG_GRIP_INTERVAL_MIN + (r % NAG_GRIP_INTERVAL_RANGE);
+        }
+    } else if (now_ms >= state->nag_grip_due_ms) {
+        grip = true;
+        state->nag_grip_frames = NAG_GRIP_PULSE_FRAMES - 1u;
+    }
+
+    // Pick torque byte — DAS-aware: bias high half when escalation level >= 3
+    uint8_t torque_b3;
+    uint8_t b2_nibble;
+    uint32_t rnd = xorshift32(&state->prng_state);
+    if (grip) {
+        torque_b3 = NAG_TORQUE_GRIP_MIN_B3 +
+                    (uint8_t)(rnd % (NAG_TORQUE_GRIP_MAX_B3 - NAG_TORQUE_GRIP_MIN_B3 + 1u));
+        b2_nibble = NAG_TORQUE_GRIP_NIBBLE;
+    } else {
+        uint8_t range = NAG_TORQUE_NORM_MAX_B3 - NAG_TORQUE_NORM_MIN_B3;
+        if (state->das_hands_on_state >= 3) {
+            // Escalated: bias upper half of normal range
+            torque_b3 = NAG_TORQUE_NORM_MIN_B3 + (range / 2u) +
+                        (uint8_t)(rnd % (range / 2u + 1u));
+        } else {
+            torque_b3 = NAG_TORQUE_NORM_MIN_B3 + (uint8_t)(rnd % (range + 1u));
+        }
+        b2_nibble = 0x08u;
+    }
+
+    out->data[2] = (frame->data[2] & 0xF0u) | b2_nibble;
+    out->data[3] = torque_b3;
+    out->data[4] = (frame->data[4] & ~0xC0u) | 0x40u;  // handsOnLevel = 1
 
     // Checksum
     uint16_t sum = 0;
-    for (int i = 0; i < 7; i++)
-        sum += out->data[i];
+    for (int i = 0; i < 7; i++) sum += out->data[i];
     sum += (CAN_ID_EPAS_STATUS & 0xFFu) + (CAN_ID_EPAS_STATUS >> 8);
     out->data[7] = (uint8_t)(sum & 0xFFu);
 
@@ -367,5 +435,32 @@ bool fsd_handle_tlssc_restore(FSDState *state, CanFrame *frame) {
 
     frame->data[0] = modified;
     state->tlssc_restore_count++;
+    return true;
+}
+
+// ── DAS_status (0x39B) read-only sniff — nag escalation level ─────────────────
+//
+// DAS_autopilotHandsOnState: bit42|4 little-endian → byte5 bits[5:2]
+// This is a 4-bit escalation level (0=none, higher=more urgent).
+// More precise than the 2-bit EPAS field; used as feedback to adapt nag torque.
+// Source: opendbc tesla_model3_party.dbc
+
+void fsd_handle_das_status(FSDState *state, const CanFrame *frame) {
+    if (frame->dlc < 6) return;
+    state->das_hands_on_state = (frame->data[5] >> 2) & 0x0Fu;
+    state->das_status_seen    = true;
+}
+
+// ── ULC stalk-confirm disable (0x3F8 bit 1) ───────────────────────────────────
+//
+// Clears bit 1 of DAS_followDistance to remove the "require blinker tap to
+// confirm lane change" behaviour on Navigate-on-Autopilot.
+// Source: ev-open-can-tools "ULC Stalk Confirm Disable" rule.
+
+bool fsd_ulc_disable(const FSDState *state, CanFrame *frame) {
+    if (!state->ulc_confirm_disable) return false;
+    if (frame->dlc < 1) return false;
+    if ((frame->data[0] & 0x02u) == 0) return false;  // already cleared — no TX needed
+    frame->data[0] &= ~0x02u;
     return true;
 }

@@ -12,7 +12,7 @@ void fsd_state_init(FSDState* state, TeslaHWVersion hw) {
         state->speed_profile = 2;
     state->op_mode = OpMode_Active;
     state->gtw_autopilot_tier = -1;
-    state->enhanced_autopilot = false;
+    state->summon_eu_unlock = false;
     state->speed_profile_locked = false;
     state->hw4_offset = 0;
 }
@@ -151,7 +151,7 @@ bool fsd_handle_autopilot_frame(FSDState* state, CANFRAME* frame) {
             fsd_set_bit(frame, 19, false);
             // Enhanced Autopilot: also set bit 46 on mux=1 (enables EAP/summon)
             // Source: ev-open-can-tools HW3Handler enhancedAutopilotRuntime
-            if(state->enhanced_autopilot) {
+            if(state->summon_eu_unlock) {
                 fsd_set_bit(frame, 46, true);
             }
             state->nag_suppressed = true;
@@ -178,7 +178,7 @@ bool fsd_handle_autopilot_frame(FSDState* state, CANFRAME* frame) {
             fsd_set_bit(frame, 19, false);
             fsd_set_bit(frame, 47, true);
             // Enhanced Autopilot: also set bit 46 (enables EAP/summon on HW4)
-            if(state->enhanced_autopilot) {
+            if(state->summon_eu_unlock) {
                 fsd_set_bit(frame, 46, true);
             }
             state->nag_suppressed = true;

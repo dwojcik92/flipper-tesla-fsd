@@ -177,10 +177,10 @@ static void process_frame(const CanFrame &frame) {
     // ── Beyond here only run when TX is allowed ───────────────────────────────
     bool tx = fsd_can_transmit(&g_state);
 
-    // NAG killer — build echo and send before the real frame propagates (0x370)
+    // NAG killer — build PRNG echo and send before the real frame propagates (0x370)
     if (frame.id == CAN_ID_EPAS_STATUS) {
         CanFrame echo;
-        bool fired = fsd_handle_nag_killer(&g_state, &frame, &echo);
+        bool fired = fsd_handle_nag_killer(&g_state, &frame, &echo, (uint32_t)millis());
         if (fired) {
             uint8_t lvl     = (frame.data[4] >> 6) & 0x03;
             uint8_t cnt_in  = frame.data[6] & 0x0F;
@@ -228,9 +228,18 @@ static void process_frame(const CanFrame &frame) {
         return;
     }
 
-    // Follow distance → speed_profile (0x3F8), no TX
+    // Follow distance → speed_profile (0x3F8); also ULC confirm disable if enabled
     if (frame.id == CAN_ID_FOLLOW_DIST) {
-        fsd_handle_follow_distance(&g_state, &frame);
+        fsd_handle_follow_distance(&g_state, &frame);  // read-only: update speed_profile
+        CanFrame f = frame;
+        if (fsd_ulc_disable(&g_state, &f) && tx)       // TX only if bit was actually set
+            g_can->send(f);
+        return;
+    }
+
+    // DAS_status (0x39B) — read-only: update 4-bit nag escalation for PRNG nag killer
+    if (frame.id == CAN_ID_DAS_STATUS) {
+        fsd_handle_das_status(&g_state, &frame);
         return;
     }
 
@@ -254,7 +263,18 @@ static void process_frame(const CanFrame &frame) {
 // ── setup ─────────────────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
+#if defined(BOARD_FEATHER_RP2040_CAN)
+    // USB CDC on RP2040: block until the host opens the port, or 5 s elapses.
+    // This means boot messages appear immediately when you attach a monitor.
+    // When running unattended (in the car, no USB host) it proceeds after 5 s.
+    {
+        uint32_t t0 = millis();
+        while (!Serial && (millis() - t0) < 5000) { delay(10); }
+    }
+    delay(50);  // let the CDC connection stabilise before the first print
+#else
     delay(300);
+#endif
 
     Serial.println("\n============================");
 #if defined(BOARD_FEATHER_RP2040_CAN)
@@ -318,7 +338,10 @@ void setup() {
     Serial.println("[HW]  Auto-detect enabled — waiting for 0x398");
 #endif
     // Explicit safe defaults — will be overridden after HW auto-detect
-#ifdef PIN_BUTTON
+#if defined(PASSIVE_MODE)
+    // PASSIVE_MODE: force listen-only — no TX regardless of board or button.
+    g_state.op_mode               = OpMode_ListenOnly;
+#elif defined(PIN_BUTTON)
     // ESP32: start listen-only; single button click enables TX.
     g_state.op_mode               = OpMode_ListenOnly;
 #else
@@ -356,7 +379,34 @@ void setup() {
     g_state.tlssc_restore         = false;
 #endif
 
+#if defined(SUMMON_EU_UNLOCK)
+    g_state.summon_eu_unlock    = true;
+#else
+    g_state.summon_eu_unlock    = false;
+#endif
+
+#if defined(ULC_CONFIRM_DISABLE)
+    g_state.ulc_confirm_disable   = true;
+#else
+    g_state.ulc_confirm_disable   = false;
+#endif
+
     g_state.bms_output            = false;
+
+    // ── Boot feature summary ──────────────────────────────────────────────────
+    Serial.println("[CFG] Feature flags:");
+    Serial.printf( "[CFG]   FORCE_FSD          : %s\n", g_state.force_fsd            ? "ON" : "off");
+    Serial.printf( "[CFG]   NAG_KILLER         : %s\n", g_state.nag_killer           ? "ON" : "off");
+    Serial.printf( "[CFG]   PRECONDITION       : %s\n", g_state.precondition         ? "ON" : "off");
+    Serial.printf( "[CFG]   TLSSC_RESTORE      : %s\n", g_state.tlssc_restore        ? "ON" : "off");
+    Serial.printf( "[CFG]   SUMMON_EU_UNLOCK   : %s\n", g_state.summon_eu_unlock     ? "ON" : "off");
+    Serial.printf( "[CFG]   ULC_CONFIRM_DISABLE: %s\n", g_state.ulc_confirm_disable  ? "ON" : "off");
+#ifdef PASSIVE_MODE
+    Serial.println("[CFG]   PASSIVE_MODE       : ON  (wiring test — no TX)");
+    Serial.println("[WARN] *** PASSIVE_MODE: ALL CAN TX DISABLED — remove flag before real use ***");
+#else
+    Serial.println("[CFG]   PASSIVE_MODE       : off");
+#endif
 
     led_set(LED_BLUE);
 
@@ -373,14 +423,18 @@ void setup() {
         }
     }
 
+#if defined(PASSIVE_MODE)
+    Serial.println("[CAN] 500 kbps — Listen-Only (PASSIVE_MODE — no TX)");
+#elif !defined(PIN_BUTTON)
+    // No button — go straight to Active so TX (NAG_KILLER etc.) works immediately.
+    // begin() always starts listen-only for safety; undo that now.
+    g_can->setListenOnly(false);
+    Serial.println("[CAN] 500 kbps — Active (no button, auto-enabled)");
+#else
     Serial.println("[CAN] 500 kbps — Listen-Only");
-#ifdef PIN_BUTTON
     Serial.println("[BTN] Single click : toggle Listen-Only / Active");
     Serial.println("[BTN] Long press 3s: toggle NAG Killer");
     Serial.println("[BTN] Double click : toggle BMS serial output");
-#else
-    Serial.println("[INFO] No button — starts in Listen-Only; NAG Killer ON");
-    Serial.println("[INFO] Toggle Active mode: connect D4 to GND momentarily");
 #endif
     Serial.println("[LED] Blue=Listen  Green=Active  Yellow=OTA  Red=Error");
 
@@ -435,6 +489,29 @@ void loop() {
             (int)g_state.batt_temp_max_c);
         last_bms_ms = now;
     }
+
+    // ── PASSIVE_MODE status line (wiring verification) ───────────────────────
+#ifdef PASSIVE_MODE
+    static uint32_t last_passive_ms = 0;
+    if ((now - last_passive_ms) >= STATUS_PRINT_MS) {
+        const char *hw_p =
+            (g_state.hw_version == TeslaHW_HW4)   ? "HW4"    :
+            (g_state.hw_version == TeslaHW_HW3)   ? "HW3"    :
+            (g_state.hw_version == TeslaHW_Legacy) ? "Legacy" : "detecting";
+        Serial.printf(
+            "[PASSIVE] RX:%lu  HW:%s"
+            "  0x398:%s 0x318:%s 0x3FD:%s 0x132:%s 0x292:%s"
+            "  (no TX)\n",
+            (unsigned long)g_state.rx_count,
+            hw_p,
+            g_state.seen_gtw_car_config ? "Y" : "-",
+            g_state.seen_gtw_car_state  ? "Y" : "-",
+            g_state.seen_ap_control     ? "Y" : "-",
+            g_state.seen_bms_hv         ? "Y" : "-",
+            g_state.seen_bms_soc        ? "Y" : "-");
+        last_passive_ms = now;
+    }
+#endif
 
     // ── Active-mode status line ───────────────────────────────────────────────
     static uint32_t last_status_ms = 0;

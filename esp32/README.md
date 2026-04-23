@@ -145,9 +145,10 @@ build_flags =
 
     ; Uncomment any features you want ON at boot:
     ;-D FORCE_FSD             ; skip the car's UI toggle — FSD always active
-    ;-D NAG_KILLER_OFF        ; start with NAG Killer disabled
+    ;-D NAG_KILLER            ; suppress hands-on-wheel reminder
     ;-D PRECONDITION          ; inject battery precondition frame every 500 ms
     ;-D TLSSC_RESTORE         ; restore TLSSC tier via 0x331 spoof
+    ;-D SUMMON_EU_UNLOCK      ; unlock larger Smart Summon range (removes EU cap)
 ```
 
 #### Feature reference (HW3)
@@ -159,6 +160,9 @@ build_flags =
 | `NAG_KILLER` | off | Suppresses hands-on-wheel reminder via `0x370` counter+1 echo | ✅ |
 | `PRECONDITION` | off | Periodically injects `0x082` (UI_tripPlanning) to trigger battery preconditioning | ✅ |
 | `TLSSC_RESTORE` | off | Spoofs `0x331` DAS config frame to restore Traffic-Light-Stop-Sign-Control tier if it was downgraded | ✅ |
+| `SUMMON_EU_UNLOCK` | off | "Summon EU Unlock HW3" (ev-open-can-tools rule 1021) — sets bit 19=0 and bit 46=1 on mux=1. Removes the EU regulatory distance cap on Smart Summon | ✅ |
+| `ULC_CONFIRM_DISABLE` | off | Clears bit 1 of `0x3F8` to remove "require blinker tap" on Navigate-on-Autopilot. Car auto-confirms lane changes without a stalk press | ✅ |
+| `PASSIVE_MODE` | off | **Wiring test only** — forces listen-only, disables ALL CAN TX. Safe to plug in without affecting the vehicle. Remove before real use | ✅ |
 | `FORCE_FSD` + `TLSSC_RESTORE` | — | Recommended combo: always enables FSD and restores the tier | ✅ |
 
 > **Features that do NOT apply to HW3** (defined in code but silently ignored on this hardware):
@@ -175,7 +179,7 @@ build_flags =
     -D HW3
 ```
 
-Full — FSD always on, NAG Killer, TLSSC restore, battery precondition:
+Full — FSD always on, NAG Killer, TLSSC restore, battery precondition, summon unlock:
 ```ini
 build_flags =
     -D BOARD_FEATHER_RP2040_CAN
@@ -185,6 +189,7 @@ build_flags =
     -D NAG_KILLER
     -D PRECONDITION
     -D TLSSC_RESTORE
+    -D SUMMON_EU_UNLOCK
 ```
 
 ### Step 2 — Put the board in bootloader mode

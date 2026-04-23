@@ -7,6 +7,7 @@
 #define CAN_ID_BMS_SOC        0x292u  // 658  - BMS_socStatus:   state of charge
 #define CAN_ID_BMS_THERMAL    0x312u  // 786  - BMS_thermalStatus: battery temp
 #define CAN_ID_GTW_CAR_STATE  0x318u  // 792  - GTW_carState:    OTA detection
+#define CAN_ID_DAS_STATUS     0x39Bu  // 923  - DAS_status: AP hands-on state (4-bit, nag feedback)
 #define CAN_ID_EPAS_STATUS    0x370u  // 880  - EPAS3P_sysStatus: nag killer target
 #define CAN_ID_GTW_CAR_CONFIG 0x398u  // 920  - GTW_carConfig:   HW version detection
 #define CAN_ID_ISA_SPEED      0x399u  // 921  - ISA speed limit:  HW4 chime suppress
@@ -31,6 +32,7 @@
   // SPI.begin() with no arguments uses them automatically.
   #define PIN_MCP_CS          10    // GPIO10 — CAN_CS
   #define PIN_CAN_INT          9    // GPIO9  — MCP25625 ~INT (active-low)
+  #undef  PIN_LED                   // board variant defines PIN_LED=13; override for NeoPixel
   #define PIN_LED             16    // GPIO16 — NeoPixel data
   #define PIN_NEOPIXEL_POWER  17    // GPIO17 — NeoPixel power (active HIGH)
   // No dedicated user button on this board; button logic is disabled.

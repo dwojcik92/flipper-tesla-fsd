@@ -41,7 +41,18 @@ struct FSDState {
     bool           suppress_speed_chime;    // ISA chime suppress (HW4, 0x399)
     bool           emergency_vehicle_detect;// set bit59 in mux0 (HW4)
     bool           nag_killer;              // 0x370 counter+1 echo
+    bool           summon_eu_unlock;      // set_bit 19=0 + bit46=1 on mux=1 — Summon EU Unlock HW3
+    bool           ulc_confirm_disable;     // clear bit1 of 0x3F8 — auto-confirm lane changes
     uint32_t       nag_echo_count;
+
+    // ── PRNG nag killer state (organic torque variation) ─────────────────────
+    uint32_t       prng_state;          // xorshift32 state (must never be 0)
+    uint32_t       nag_grip_due_ms;     // millis() when next grip pulse fires (0=uninit)
+    uint8_t        nag_grip_frames;     // frames remaining in current grip excursion
+
+    // ── DAS_status (0x39B) sniff — nag feedback ───────────────────────────────
+    uint8_t        das_hands_on_state;  // 4-bit escalation level (0=none, higher=urgent)
+    bool           das_status_seen;
 
     // ── Mode + diagnostics ────────────────────────────────────────────────────
     OpMode         op_mode;
@@ -108,9 +119,17 @@ bool fsd_handle_legacy_autopilot(FSDState *state, CanFrame *frame);
  *  Returns true if frame was modified and should be re-sent. */
 bool fsd_handle_isa_speed_chime(CanFrame *frame);
 
-/** Build an echo of EPAS3P_sysStatus (0x370) with counter+1 and handsOnLevel=1.
- *  Writes result into *out.  Returns true if echo should be sent. */
-bool fsd_handle_nag_killer(FSDState *state, const CanFrame *frame, CanFrame *out);
+/** Build an echo of EPAS3P_sysStatus (0x370) with PRNG torque variation and
+ *  DAS-aware intensity.  now_ms = millis().  Returns true if echo should be sent. */
+bool fsd_handle_nag_killer(FSDState *state, const CanFrame *frame, CanFrame *out, uint32_t now_ms);
+
+/** Parse DAS_status (0x39B) — updates das_hands_on_state (4-bit nag escalation). */
+void fsd_handle_das_status(FSDState *state, const CanFrame *frame);
+
+/** Modify DAS_followDistance (0x3F8) to clear ULC stalk-confirm bit (bit 1).
+ *  Disables "require blinker tap" for Navigate-on-Autopilot lane changes.
+ *  Returns true if frame was modified and should be re-sent. */
+bool fsd_ulc_disable(const FSDState *state, CanFrame *frame);
 
 /** Parse BMS_hvBusStatus (0x132) — updates pack_voltage_v / pack_current_a. */
 void fsd_handle_bms_hv(FSDState *state, const CanFrame *frame);
