@@ -83,9 +83,15 @@ uint8_t fsd_read_mux_id(const CANFRAME* frame) {
 }
 
 bool fsd_is_selected_in_ui(const CANFRAME* frame, bool force_fsd) {
+#ifdef FORCE_FSD
+    (void)frame;
+    (void)force_fsd;
+    return true;
+#else
     if(force_fsd) return true;
     if(frame->data_lenght < 5) return false;
     return (frame->buffer[4] >> 6) & 0x01;
+#endif
 }
 
 TeslaHWVersion fsd_detect_hw_version(const CANFRAME* frame) {

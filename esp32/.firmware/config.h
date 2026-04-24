@@ -19,6 +19,7 @@
 #define CAN_ID_FOLLOW_DIST    0x3F8u  // 1016 - DAS_followDistance: speed profile source
 #define CAN_ID_DAS_AP_CONFIG  0x331u  // 817  - DAS autopilot config (tier restore target, ~1 Hz)
 #define CAN_ID_AP_CONTROL     0x3FDu  // 1021 - DAS_autopilotControl: HW3 / HW4 core
+#define CAN_ID_GTW_CONFIG_ETH 0x7FFu  // 2047 - GTW_carConfig: autopilot tier readback
 
 // ── GPIO ──────────────────────────────────────────────────────────────────────
 #if defined(BOARD_LILYGO)

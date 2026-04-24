@@ -68,6 +68,7 @@ struct FSDState {
     uint32_t       seen_bms_hv;             // 0x132 seen count
     uint32_t       seen_bms_soc;            // 0x292 seen count
     uint32_t       seen_bms_thermal;        // 0x312 seen count
+    uint32_t       seen_gtw_config_eth;     // 0x7FF seen count
 
     // ── BMS read-only sniff ───────────────────────────────────────────────────
     bool           bms_output;       // print BMS data to serial
@@ -84,6 +85,9 @@ struct FSDState {
     // ── TLSSC Restore (0x331 DAS config spoof) ──────────────────────────────
     bool           tlssc_restore;
     uint32_t       tlssc_restore_count;
+
+    // ── GTW_carConfig 0x7FF mux=2 autopilot tier readback ───────────────────
+    int8_t         gtw_autopilot_tier;      // -1 unknown; 0 none; 1 highway; 2 enhanced; 3 self-driving; 4 basic
 };
 
 // ── API ───────────────────────────────────────────────────────────────────────
@@ -147,3 +151,7 @@ void fsd_build_precondition_frame(CanFrame *frame);
  *  Overwrites byte[0] lower 6 bits to 0x1B (SELF_DRIVING).
  *  Returns true if frame was modified and should be re-sent. */
 bool fsd_handle_tlssc_restore(FSDState *state, CanFrame *frame);
+
+/** Parse GTW_carConfig (0x7FF) mux=2 autopilot tier readback.
+ *  byte[5] bits 4:2: 0=NONE 1=HIGHWAY 2=ENHANCED 3=SELF_DRIVING 4=BASIC. */
+void fsd_handle_gtw_autopilot_tier(FSDState *state, const CanFrame *frame);

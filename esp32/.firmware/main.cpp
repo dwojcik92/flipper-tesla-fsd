@@ -143,6 +143,7 @@ static void process_frame(const CanFrame &frame) {
     if (frame.id == CAN_ID_BMS_HV_BUS)     g_state.seen_bms_hv++;
     if (frame.id == CAN_ID_BMS_SOC)        g_state.seen_bms_soc++;
     if (frame.id == CAN_ID_BMS_THERMAL)    g_state.seen_bms_thermal++;
+    if (frame.id == CAN_ID_GTW_CONFIG_ETH) g_state.seen_gtw_config_eth++;
 
     // DLC sanity: skip zero-length frames
     if (frame.dlc == 0) return;
@@ -173,6 +174,10 @@ static void process_frame(const CanFrame &frame) {
     if (frame.id == CAN_ID_BMS_HV_BUS)  { fsd_handle_bms_hv(&g_state, &frame);      return; }
     if (frame.id == CAN_ID_BMS_SOC)     { fsd_handle_bms_soc(&g_state, &frame);     return; }
     if (frame.id == CAN_ID_BMS_THERMAL) { fsd_handle_bms_thermal(&g_state, &frame); return; }
+    if (frame.id == CAN_ID_GTW_CONFIG_ETH) {
+        fsd_handle_gtw_autopilot_tier(&g_state, &frame);
+        return;
+    }
 
     // ── Beyond here only run when TX is allowed ───────────────────────────────
     bool tx = fsd_can_transmit(&g_state);
@@ -254,8 +259,19 @@ static void process_frame(const CanFrame &frame) {
     // HW3/HW4 autopilot control (0x3FD) — main FSD activation frame
     if (frame.id == CAN_ID_AP_CONTROL) {
         CanFrame f = frame;
-        if (fsd_handle_autopilot_frame(&g_state, &f) && tx)
-            g_can->send(f);
+        bool modified = fsd_handle_autopilot_frame(&g_state, &f);
+        if (modified) {
+#if defined(DEBUG_AP_CONTROL)
+            uint8_t mux = f.data[0] & 0x07u;
+            Serial.printf(
+                "[DBG] 0x3FD mux:%u tx:%u data:%02X %02X %02X %02X %02X %02X %02X %02X\n",
+                mux,
+                tx ? 1 : 0,
+                f.data[0], f.data[1], f.data[2], f.data[3],
+                f.data[4], f.data[5], f.data[6], f.data[7]);
+#endif
+            if (tx) g_can->send(f);
+        }
         return;
     }
 }
@@ -500,13 +516,14 @@ void loop() {
             (g_state.hw_version == TeslaHW_Legacy) ? "Legacy" : "detecting";
         Serial.printf(
             "[PASSIVE] RX:%lu  HW:%s"
-            "  0x398:%s 0x318:%s 0x3FD:%s 0x132:%s 0x292:%s"
+            "  0x398:%s 0x318:%s 0x3FD:%s 0x7FF:%s 0x132:%s 0x292:%s"
             "  (no TX)\n",
             (unsigned long)g_state.rx_count,
             hw_p,
             g_state.seen_gtw_car_config ? "Y" : "-",
             g_state.seen_gtw_car_state  ? "Y" : "-",
             g_state.seen_ap_control     ? "Y" : "-",
+            g_state.seen_gtw_config_eth ? "Y" : "-",
             g_state.seen_bms_hv         ? "Y" : "-",
             g_state.seen_bms_soc        ? "Y" : "-");
         last_passive_ms = now;
@@ -523,12 +540,13 @@ void loop() {
             (g_state.hw_version == TeslaHW_Legacy)  ? "Legacy" : "?";
         Serial.printf(
             "[STA] HW:%-6s FSD:%-4s NAG:%-10s OTA:%-3s "
-            "Profile:%d  RX:%lu TX:%lu Err:%lu\n",
+            "Profile:%d GTWtier:%d  RX:%lu TX:%lu Err:%lu\n",
             hw_str,
             g_state.fsd_enabled     ? "ON"         : "wait",
             g_state.nag_suppressed  ? "suppressed"  : "active",
             g_state.tesla_ota_in_progress ? "YES"  : "no",
             g_state.speed_profile,
+            (int)g_state.gtw_autopilot_tier,
             (unsigned long)g_state.rx_count,
             (unsigned long)g_state.frames_modified,
             (unsigned long)g_state.crc_err_count);

@@ -232,6 +232,8 @@ input:checked+.sl2:before{transform:translateX(20px);background:#fff}
     <div class="sb"><div class="sv" id="txCnt">0</div><div class="sl">TX Modified</div></div>
     <div class="sb"><div class="sv" id="crcErr">0</div><div class="sl">CRC Errors</div></div>
     <div class="sb"><div class="sv" id="fps">0.0</div><div class="sl">Frames/s</div></div>
+    <div class="sb"><div class="sv" id="gtw7ff">0</div><div class="sl">0x7FF Frames</div></div>
+    <div class="sb"><div class="sv" id="gtwTier">--</div><div class="sl">GTW AP Tier</div></div>
   </div>
 </div>
 
@@ -295,6 +297,7 @@ input:checked+.sl2:before{transform:translateX(20px);background:#fff}
 <script>
 var ws,rt;
 var HW=['Unknown','Legacy','HW3','HW4'];
+var GTW_TIER=['NONE','HIGHWAY','ENHANCED','SELF_DRIVING','BASIC'];
 var CIRC=326.73;
 
 function fmt(s){
@@ -349,6 +352,8 @@ function upd(d){
   document.getElementById('txCnt').textContent=d.tx_count.toLocaleString();
   document.getElementById('crcErr').textContent=d.crc_errors;
   document.getElementById('fps').textContent=d.fps.toFixed(1);
+  document.getElementById('gtw7ff').textContent=(d.gtw_7ff_seen||0).toLocaleString();
+  document.getElementById('gtwTier').textContent=d.gtw_autopilot_tier>=0?(GTW_TIER[d.gtw_autopilot_tier]||String(d.gtw_autopilot_tier)):'--';
 
   // Battery
   if(d.bms && d.bms.seen){
@@ -452,6 +457,8 @@ static String build_json() {
     j += "\"bms_hv_seen\":";   j += g_state->seen_bms_hv;              j += ',';
     j += "\"bms_soc_seen\":";  j += g_state->seen_bms_soc;             j += ',';
     j += "\"bms_thermal_seen\":"; j += g_state->seen_bms_thermal;       j += ',';
+    j += "\"gtw_7ff_seen\":";  j += g_state->seen_gtw_config_eth;       j += ',';
+    j += "\"gtw_autopilot_tier\":"; j += (int)g_state->gtw_autopilot_tier; j += ',';
     j += "\"rx_count\":";      j += g_state->rx_count;                 j += ',';
     j += "\"tx_count\":";      j += g_state->frames_modified;          j += ',';
     j += "\"crc_errors\":";    j += g_state->crc_err_count;            j += ',';
@@ -504,8 +511,13 @@ static void ws_event(uint8_t num, WStype_t type,
         g_state->tlssc_restore = (strstr(buf, "true") != nullptr);
         Serial.printf("[Web] TLSSC Restore: %s\n", g_state->tlssc_restore ? "ON" : "OFF");
     } else if (strstr(buf, "\"force_fsd\"")) {
+#if defined(FORCE_FSD)
+        g_state->force_fsd = true;
+        Serial.println("[Web] Force FSD: ON (compile-time)");
+#else
         g_state->force_fsd = (strstr(buf, "true") != nullptr);
         Serial.printf("[Web] Force FSD: %s\n", g_state->force_fsd ? "ON" : "OFF");
+#endif
     } else if (strstr(buf, "\"dump\"")) {
         bool want = (strstr(buf, "true") != nullptr);
         if (want) can_dump_start();

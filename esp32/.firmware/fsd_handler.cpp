@@ -31,12 +31,18 @@ static uint8_t read_mux_id(const CanFrame *frame) {
 }
 
 static bool is_fsd_selected(const CanFrame *frame, bool force_fsd) {
+#if defined(FORCE_FSD)
+    (void)frame;
+    (void)force_fsd;
+    return true;
+#else
     if (force_fsd) return true;
     if (frame->dlc < 5) return false;
     // DAS_autopilotControl byte 4 bits [7:6] = UI "FSD selected" flag (bit 38 in the 64-bit data
     // field).  Note: bit 46 is the *output* FSD-activation bit written to the modified frame —
     // a different field at byte 5 bit 6.
     return (frame->data[4] >> 6) & 0x01;
+#endif
 }
 
 // ── State init ────────────────────────────────────────────────────────────────
@@ -52,6 +58,7 @@ void fsd_state_init(FSDState *state, TeslaHWVersion hw) {
     state->emergency_vehicle_detect = false;
     state->force_fsd            = false;
     state->bms_output           = false;
+    state->gtw_autopilot_tier   = -1;
     state->prng_state           = 0xABCDABCDu; // xorshift32 seed (must be non-zero)
 
     // Default speed profile per HW version
@@ -145,6 +152,15 @@ bool fsd_handle_autopilot_frame(FSDState *state, CanFrame *frame) {
     if (state->hw_version != TeslaHW_HW3 && state->hw_version != TeslaHW_HW4)
         return false;
 
+    // True observe-only baseline: if no AP-related injection feature is enabled,
+    // sniff the frame but do not modify or retransmit it.
+    bool ap_injection_enabled =
+        state->force_fsd ||
+        state->summon_eu_unlock ||
+        (state->hw_version == TeslaHW_HW4 && state->emergency_vehicle_detect);
+    if (!ap_injection_enabled)
+        return false;
+
     uint8_t mux     = read_mux_id(frame);
     bool    fsd_ui  = is_fsd_selected(frame, state->force_fsd);
     bool    modified = false;
@@ -154,7 +170,7 @@ bool fsd_handle_autopilot_frame(FSDState *state, CanFrame *frame) {
 
     if (state->hw_version == TeslaHW_HW3) {
         // ── HW3 ──────────────────────────────────────────────────────────────
-        if (mux == 0 && state->fsd_enabled) {
+        if (mux == 0 && state->force_fsd && state->fsd_enabled) {
             // Compute speed offset from current speed signal (bits 6:1 of byte 3)
             int raw    = (int)((frame->data[3] >> 1) & 0x3F) - 30;
             int offset = raw * 5;
@@ -170,17 +186,13 @@ bool fsd_handle_autopilot_frame(FSDState *state, CanFrame *frame) {
             frame->data[6] |= (uint8_t)((state->speed_profile & 0x03) << 1);
             modified = true;
         }
-        if (mux == 1) {
-            // Nag suppression via bit 19 (clear = no hands-on-wheel request)
+        if (mux == 1 && state->summon_eu_unlock) {
             set_bit(frame, 19, false);
-            // Enhanced Autopilot / summon unlock: set bit 46 on mux=1
-            // Source: ev-open-can-tools HW3Handler enhancedAutopilotRuntime
-            if (state->summon_eu_unlock)
-                set_bit(frame, 46, true);
+            set_bit(frame, 46, true);
             state->nag_suppressed = true;
             modified = true;
         }
-        if (mux == 2 && state->fsd_enabled) {
+        if (mux == 2 && state->force_fsd && state->fsd_enabled) {
             // Write speed offset into bits 7:6 of byte 0 and bits 5:0 of byte 1
             frame->data[0] &= ~0xC0u;
             frame->data[1] &= ~0x3Fu;
@@ -190,20 +202,24 @@ bool fsd_handle_autopilot_frame(FSDState *state, CanFrame *frame) {
         }
     } else {
         // ── HW4 ──────────────────────────────────────────────────────────────
-        if (mux == 0 && state->fsd_enabled) {
-            set_bit(frame, 46, true);   // FSD activation
-            set_bit(frame, 60, true);   // HW4 additional FSD bit
-            if (state->emergency_vehicle_detect)
-                set_bit(frame, 59, true);  // emergency vehicle detection
-            modified = true;
+        if (mux == 0) {
+            if (state->force_fsd && state->fsd_enabled) {
+                set_bit(frame, 46, true);   // FSD activation
+                set_bit(frame, 60, true);   // HW4 additional FSD bit
+                modified = true;
+            }
+            if (state->emergency_vehicle_detect) {
+                set_bit(frame, 59, true);   // emergency vehicle detection
+                modified = true;
+            }
         }
-        if (mux == 1) {
+        if (mux == 1 && state->summon_eu_unlock) {
             set_bit(frame, 19, false);  // clear hands-on-wheel nag
             set_bit(frame, 47, true);   // HW4 nag-suppression confirmation bit
             state->nag_suppressed = true;
             modified = true;
         }
-        if (mux == 2) {
+        if (mux == 2 && state->force_fsd && state->fsd_enabled) {
             // Write speed profile into bits 6:4 of byte 7
             frame->data[7] &= ~(uint8_t)(0x07u << 4);
             frame->data[7] |=  (uint8_t)((state->speed_profile & 0x07u) << 4);
@@ -317,6 +333,13 @@ bool fsd_handle_nag_killer(FSDState *state, const CanFrame *frame, CanFrame *out
     // Level 1 = hands confirmed OK — no action needed.
     uint8_t hands_on_epas = (frame->data[4] >> 6) & 0x03;
     if (hands_on_epas == 1) return false;
+
+    // DAS-aware gating: only echo when DAS is actually asking for hands-on.
+    // 0 = not required, 8 = suspended. Before we've seen any DAS frame,
+    // stay conservative and do not inject.
+    if (!state->das_status_seen) return false;
+    if (state->das_hands_on_state == 0u) return false;
+    if (state->das_hands_on_state == 8u) return false;
 
     // Initialise grip-pulse timer on first call
     if (state->nag_grip_due_ms == 0) {
@@ -436,6 +459,16 @@ bool fsd_handle_tlssc_restore(FSDState *state, CanFrame *frame) {
     frame->data[0] = modified;
     state->tlssc_restore_count++;
     return true;
+}
+
+// ── GTW_carConfig (0x7FF) mux=2 autopilot tier readback ──────────────────────
+// byte[5] bits 4:2: 0=NONE 1=HIGHWAY 2=ENHANCED 3=SELF_DRIVING 4=BASIC
+
+void fsd_handle_gtw_autopilot_tier(FSDState *state, const CanFrame *frame) {
+    if (frame->dlc < 6) return;
+    uint8_t mux = frame->data[0] & 0x07u;
+    if (mux != 2) return;
+    state->gtw_autopilot_tier = (int8_t)((frame->data[5] >> 2) & 0x07u);
 }
 
 // ── DAS_status (0x39B) read-only sniff — nag escalation level ─────────────────

@@ -45,7 +45,11 @@ TeslaFSDApp* tesla_fsd_app_alloc(void) {
     app->hw_version = TeslaHW_Unknown;
     fsd_state_init(&app->fsd_state, TeslaHW_Unknown);
 
+#ifdef FORCE_FSD
+    app->force_fsd = true;
+#else
     app->force_fsd = false;
+#endif
     app->suppress_speed_chime = false;
     app->emergency_vehicle_detect = false;
     app->nag_killer = false;
